@@ -3,6 +3,8 @@ PYTHON GEODESIC LINES SCRIPT
 
 Inspired by http://www.physikdidaktik.uni-karlsruhe.de/software/geodesiclab/a3.html
 
+From a discussion by Math Stunned on Stackoverflow:
+https://stackoverflow.com/questions/60106732/how-to-plot-geodesic-curves-on-a-surface-embedded-in-3d
 """
 
 import numpy as np
