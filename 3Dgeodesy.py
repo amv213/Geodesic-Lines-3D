@@ -1,5 +1,5 @@
 """
-GEODESIC LINES SCRIPT
+PYTHON GEODESIC LINES SCRIPT
 
 Inspired by http://www.physikdidaktik.uni-karlsruhe.de/software/geodesiclab/a3.html
 
@@ -12,17 +12,171 @@ from matplotlib import cm
 from mpl_toolkits import mplot3d
 
 
-def f(x, y):
+class Canvas:
     """
-    Function on which to calculate geodesic lines.
-    Here it's a rescaled Gaussian but can change it to whatever you like
+    The canvas area containing the surface function on which we want to compute geo-lines.
+    """
+
+    def __init__(self, f, xmin=-1, xmax=1, ymin=-1, ymax=1, smoothness=200):
+
+        self.f = f  # f(x,y) function defining the 'world' landscape
+
+        self.xmin = xmin    # lower x-axis limit of the grid on which to evaluate the function
+        self.xmax = xmax    # higher x-axis limit of the grid on which to evaluate the function
+        self.ymin = ymin    # lower y-axis limit of the grid on which to evaluate the function
+        self.ymax = ymax    # higher y-axis limit of the grid on which to evaluate the function
+
+        self.smoothness = smoothness    # number of points over which to evaluate the function
+
+    def dfdx(self, x, y):
+        """
+        Approximate derivative of the function with respect to x, evaluated at the point (x,y)
+
+        args:
+            x:          x coordinate of the point
+            y:          y coordinate of the point
+
+        returns: df/dx
+        """
+
+        epsilon = 0.0001
+        return (self.f(x + epsilon, y) - self.f(x - epsilon, y)) / (2 * epsilon)
+
+    def dfdy(self, x, y):
+        """
+        Approximate derivative of the function with respect to y, evaluated at the point (x,y)
+
+        args:
+            x:          x coordinate of the point
+            y:          y coordinate of the point
+
+        returns: df/dy
+        """
+
+        epsilon = 0.0001
+        return (self.f(x, y + epsilon) - self.f(x, y - epsilon)) / (2 * epsilon)
+
+    def fn(self, x, y):
+        """
+         Unit normal vector, evaluated at the point (x,y)
+
+         args:
+             x:          x coordinate of the point
+             y:          y coordinate of the point
+
+         returns: unit normal vector
+         """
+
+        n = np.array([self.dfdx(x, y), self.dfdy(x, y), -1])
+        mag = np.sqrt(n[0] ** 2 + n[1] ** 2 + 1)
+
+        return n / mag
+
+
+class GeoLine:
+    """
+    The geodesic line object and all its properties
+    """
+
+    def __init__(self, canvas, x0, y0, dx0=0, dy0=0.05, step_size=0.01):
+
+        self.canvas = canvas    # the Canvas object on which the geo-line will be evaluated
+
+        self.x = np.array([x0])     # array of x coordinates of the geo-line trajectory
+        self.y = np.array([y0])     # array of y coordinates of the geo-line trajectory
+        self.z = self.canvas.f(self.x, self.y)  # array of z coordinates of the geo-line trajectory
+
+        self.init_step(x0, y0, dx0, dy0, step_size)     # do arbitrary initialisation step in one direction
+
+        self.finished = False   # whether the whole geo-line trajectory has been calculated
+
+    def init_step(self, x, y, dx, dy, step_size):
+        """
+        Perform a first initialisation step to prepare trajectory for iterative algorithm
+
+        args:
+            x:          current geo-line x position
+            y:          current geo-line y position
+            dx:         initialisation step in the x direction
+            dy:         initialisation step in the y direction
+            step_size:  hyperparameter regulating scale of initialisation step
+
+        returns:    updated geo-line position arrays
+        """
+
+        eta = step_size / np.sqrt(dx ** 2 + dy ** 2)
+
+        self.x = np.append(self.x, x + eta * dx)
+        self.y = np.append(self.y, y + eta * dy)
+        self.z = np.append(self.z, self.canvas.f(self.x[-1], self.y[-1]))
+
+    def is_out_bounds(self, x, y):
+        """
+         Checks if a given point is outside of the canvas area.
+
+         args:
+             x:      x coordinate of the point
+             y:      y coordinate of the point
+
+         returns: updated geo-line status
+         """
+
+        if x < self.canvas.xmin or x > self.canvas.xmax or y < self.canvas.ymin or y > self.canvas.ymax:
+            self.finished = True
+
+    def step_next(self):
+        """
+        Advances the geo-line by one step.
+        Calculation based on geo-line position at time t and at time (t-1)
+
+        returns: updated geo-line position arrays and updated .finished status
+        """
+
+        # Current position
+        xt = self.x[-1]
+        yt = self.y[-1]
+        zt = self.canvas.f(xt, yt)
+
+        # Previous position
+        xtm1 = self.x[-2]
+        ytm1 = self.y[-2]
+        ztm1 = self.canvas.f(xtm1, ytm1)
+
+        # Symmetric position wrt current position
+        # i.e. position such that position at time t is the midpoint between the position at (t-1) and this position
+        xp = xt + (xt - xtm1)  # read as 'x+'
+        yp = yt + (yt - ytm1)
+        zp = zt + (zt - ztm1)
+
+        # Difference between predicted value of f and actual value of f at the symmetric point
+        dz = zp - self.canvas.f(xp, yp)
+        # Normal at current position
+        n = self.canvas.fn(xt, yt)
+        # Correction factor
+        gamma = dz * n[2]
+
+        # Next position (correcting the 'symmetric' guess by a factor gamma*n)
+        xtp1 = xp - gamma * n[0]  # read as 'x_{t+1}'
+        ytp1 = yp - gamma * n[1]
+
+        # Update geo-line trajectory with the new position
+        self.x = np.append(self.x, xtp1)
+        self.y = np.append(self.y, ytp1)
+        self.z = np.append(self.z, self.canvas.f(xtp1, ytp1))
+
+        # Check if new step is out of bounds, then geo-line is finished
+        self.is_out_bounds(xtp1, ytp1)
+
+
+def my_func(x, y):
+    """
+    Landscape on which to calculate geodesic lines.
 
     args:
         x:      x coordinate of the point
         y:      y coordinate of the point
 
     returns: f(x,y)
-
     """
 
     # Flat Bump
@@ -46,215 +200,77 @@ def f(x, y):
     return z
 
 
-def dfdx(x, y, epsilon=0.0001):
-    """
-    Approximate derivative of the function with respect to x, evaluated at the point (x,y)
-
-    args:
-        x:          x coordinate of the point
-        y:          y coordinate of the point
-        epsilon:    infinitesimal epsilon for interval on which to approximate derivative
-
-    returns: df/dx
-    """
-
-    return (f(x + epsilon, y) - f(x - epsilon, y))/(2*epsilon)
-
-
-def dfdy(x, y, epsilon=0.0001):
-    """
-    Approximate derivative of the function with respect to y, evaluated at the point (x,y)
-
-    args:
-        x:          x coordinate of the point
-        y:          y coordinate of the point
-        epsilon:    infinitesimal epsilon for interval on which to approximate derivative
-
-    returns: df/dy
-    """
-
-    return (f(x, y + epsilon) - f(x, y - epsilon)) / (2 * epsilon)
-
-
-def fnormal(x, y):
-    """
-     Normal vector, evaluated at the point (x,y)
-
-     args:
-         x:          x coordinate of the point
-         y:          y coordinate of the point
-
-     returns: vector
-     """
-
-    n = np.array([-dfdx(x,y), -dfdy(x,y), 1])
-
-    # We return the normalised vector
-    return n/np.sqrt(n[0]**2 + n[1]**2 + 1)
-
-
-def is_out_bounds(x, y, x_ax_min, x_ax_max, y_ax_min, y_ax_max):
-    """
-    Checks if a given point is outside of the plotting area.
-
-    args:
-        x:      x coordinate of the point
-        y:      y coordinate of the point
-        *:      x/y min/max boundaries of the plotting area
-
-    returns: boolean
-    """
-
-    # Our plotting area is hard coded to span the (-1, 1)^2 range
-    if x < x_ax_min or x > x_ax_max or y < y_ax_min or y > y_ax_max:
-        return 1
-    else:
-        return 0
-
-
-# ACTUAL SCRIPT STARTS HERE:
 if __name__ == "__main__":
 
-    # DEFINE GENERAL PARAMETERS
+    # ------------------------------------------------------------------------------------------------------------------
+    # ALGORITHM
+    # ------------------------------------------------------------------------------------------------------------------
 
-    x_ax_min, x_ax_max = -1, 1      # x-axis limits
-    y_ax_min, y_ax_max = -1, 1      # y-axis limits
-    smoothness = 200                # smoothness of the surface plot
-    max_num_iter = 1000              # max number of points per line
-    step_size = 0.01                # arbitrary, increase to do bigger steps on each iteration
-    num_lines = 28                  # number of geodesic lines to draw
-    cmap = cm.get_cmap('hsv')   # decide which colormap to use for the geodesic lines
+    max_num_iter = 1000     # max number of points per line
+    num_lines = 28          # number of geodesic lines to draw
 
-    # PLOT SURFACE:
+    # -- SANDBOX INITIALIZATION
+    # -- The surface on which we want to calculate geo-lines
 
+    sandbox = Canvas(my_func)  # can use any arbitrary function
+
+    # -- CALCULATE GEO-LINES
+
+    buffer_x, buffer_y, buffer_z = [], [], []  # initialize containers for geo-line trajectories
+
+    # creating multiple uniformly spaced geo-lines all starting on the canvas y-edge
+    for (line_idx, x_start) in enumerate(np.linspace(sandbox.xmin+0.055, sandbox.xmax-0.055, num_lines)):
+
+        # Initialize geo-line, evolving in our sandbox
+        geoline = GeoLine(sandbox, x0=x_start, y0=sandbox.ymin)
+
+        # Propagate geo-line for N time-steps
+        for i in range(1, max_num_iter):
+
+            if geoline.finished:
+                break
+            else:
+                geoline.step_next()
+
+        print(f"Geodesic Line {line_idx} | DONE")
+
+        buffer_x.append(geoline.x), buffer_y.append(geoline.y), buffer_z.append(geoline.z)  # update buffers
+
+    # ------------------------------------------------------------------------------------------------------------------
+    # PLOTTING
+    # ------------------------------------------------------------------------------------------------------------------
+
+    # -- PLOT SANDBOX:
     fig = plt.figure(figsize=(32, 16))
 
-    # fig3D = plt.figure(figsize=(16, 16))
+    x = np.linspace(sandbox.xmin, sandbox.xmax, sandbox.smoothness)
+    y = np.linspace(sandbox.ymin, sandbox.ymax, sandbox.smoothness)
+    X, Y = np.meshgrid(x, y)
+    Z = sandbox.f(X, Y)
+
+    # ---- 3D SANDBOX
     ax3 = fig.add_subplot(1, 2, 1, projection='3d')
     ax3.set_axis_off()
 
-    # fig2D = plt.figure(figsize=(16, 16))
-    #ax2 = plt.gca()
+    surf3 = ax3.plot_surface(X, Y, Z, cmap='binary', vmin=np.min(Z), vmax=4 * np.max(Z))
+
+    # ---- 2D SANDBOX
     ax2 = fig.add_subplot(1, 2, 2)
     ax2.set_aspect('equal')
     ax2.set_axis_off()
 
-    x = np.linspace(x_ax_min, x_ax_max, smoothness)
-    y = np.linspace(y_ax_min, y_ax_max, smoothness)
-    X, Y = np.meshgrid(x, y)
-    Z = f(X, Y)
-
-    surf3 = ax3.plot_surface(X, Y, Z, cmap='binary', vmin=np.min(Z), vmax=4*np.max(Z))  # 3D
-    surf2 = ax2.contourf(X, Y, Z, cmap='binary', vmin=np.min(Z), vmax=4*np.max(Z))  # 2D
+    surf2 = ax2.contourf(X, Y, Z, cmap='binary', vmin=np.min(Z), vmax=4 * np.max(Z))
     cb = fig.colorbar(surf2, shrink=0.75)
 
-    # PLOT GEODESIC LINES:
+    # -- PLOT GEO-LINES
+    cmap = cm.get_cmap('hsv')  # decide which colormap to use for the geodesic lines
+    for i in range(num_lines):
 
-    # Here we are simply starting the lines from different starting points
-    for (l, x_start) in enumerate(np.linspace(x_ax_min+0.055, x_ax_max-0.055, num_lines)):
+        ax2.plot(buffer_x[i], buffer_y[i], c=cmap(i / num_lines), zorder=3)  # Plot 2D trajectory
+        ax3.plot(buffer_x[i], buffer_y[i], buffer_z[i], c=cmap(i / num_lines), zorder=3)  # Plot 3D trajectory
 
-        # starting point
-        x0 = x_start
-        y0 = y_ax_min
-
-        # initial step
-        dx0 = 0.
-        dy0 = 0.05
-
-        # Normalised learning rate
-        c = step_size
-        eta = c / np.sqrt(dx0**2 + dy0**2)
-
-        # Initialize position arrays
-        x = np.array([x0, x0 + eta*dx0])
-        y = np.array([y0, y0 + eta*dy0])
-
-        # MAIN ALGORITHM I
-        for i in range(1, max_num_iter):  # we simulate N time-steps
-
-            # Current position
-            xt = x[i]
-            yt = y[i]
-            ft = f(xt, yt)
-
-            # If the current point is out of the plotting area we stop
-            if is_out_bounds(xt, yt, x_ax_min, x_ax_max, y_ax_min, y_ax_max):
-
-                print(f"Geodesic Line {l} Finished")
-                break
-
-            # Previous position
-            xtm1 = x[i-1]  # read as 'x_{t-1}'
-            ytm1 = y[i-1]
-            ftm1 = f(xtm1, ytm1)
-
-            # Symmetric position wrt current position
-            xsymp = xt + (xt - xtm1)  # read as 'x symmetric +'
-            ysymp = yt + (yt - ytm1)
-            fsymp = ft + (ft - ftm1)
-
-            # Difference between predicted 'symmetric' value of f and actual value of f at the symmetric point
-            df = fsymp - f(xsymp, ysymp)
-            # Normal at current position
-            n = fnormal(xt, yt)
-            # Correction factor
-            gamma = df*n[2]
-
-            # Next position. We are essentialy correcting the 'symmetric' guess by a factor gamma*n
-            xtp1 = xsymp - gamma*n[0]  # read as 'x_{t+1}'
-            ytp1 = ysymp - gamma*n[1]
-
-            # Update our lists with the new position
-            x = np.append(x, xtp1)
-            y = np.append(y, ytp1)
-
-        # x and y now hold complete trajectory (based on some kind of iterative midpoint method?)
-
-        # MAIN ALGORITHM II
-        # This seems to be doing a second pass through our trajectories and tweaking them to get final results
-
-        posx = np.array(len(x))  # initialize empty arrays
-        posy = np.array(len(y))
-        posz = np.array(len(x))
-
-        for i in range(len(x)-1):
-
-            # Current position
-            xt = x[i]
-            yt = y[i]
-
-            # Offset from next position
-            dx = x[i+1] - xt
-            dy = y[i+1] - yt
-
-            dn = np.sqrt(dx**2 + dy**2)
-            df = dfdx(xt, yt)*dx/dn + dfdy(xt, yt)*dy/dn
-            dfn = 1/np.sqrt(1 + df**2)
-
-            # Correct current position
-
-            if i % 2 == 1:  # not too sure of this step but it's what the website was doing ...
-                pm = 1      # ... every second point we will be switching between adding / subtracting the correction
-            else:
-                pm = -1
-
-            xt_actual = xt + pm*dfn*dx  # pm is 'plus or minus'
-            yt_actual = yt + pm*dfn*dy
-            zt_actual = f(xt_actual, yt_actual)
-
-            # Push to lists
-            posx = np.append(posx, xt_actual)
-            posy = np.append(posy, yt_actual)
-            posz = np.append(posz, zt_actual)
-
-        # Plot trajectory
-        ax3.plot(posx[1:], posy[1:], posz[1:], c=cmap(l/num_lines), zorder=3)  # 3D
-        ax2.plot(posx[1:], posy[1:], c=cmap(l/num_lines), zorder=3)  # 2D
-        # (omit first point because the algorithm messes it up for some reason)
-
-
-    plt.xlim(x_ax_min, x_ax_max)
-    plt.ylim(y_ax_min, y_ax_max)
+    plt.xlim(sandbox.xmin, sandbox.xmax)
+    plt.ylim(sandbox.ymin, sandbox.ymax)
 
     plt.tight_layout()
     plt.show()
